@@ -1,31 +1,29 @@
 ---
-version: '3'
+version: "3"
 
 vars:
   DEVICE_LABEL: "JBGPG"
   BACKUP_NAME: "all-secret-keys.asc"
   FINGERPRINT: "DE99604016EF8893AD54FDE83BC85C121EA96233"
   KEY_NAME: "jbgpg"
-  TEMP_DIR:
-    sh: mktemp -d -p $XDG_RUNTIME_DIR gpg.XXXXXX
   DEVICE:
-    sh: blkid -L {{ .DEVICE_LABEL }}
+    sh: blkid -L {{ .DEVICE_LABEL }} || echo ""
   GPGDIR:
     sh: echo "${GNUPGHOME:-$HOME/.gnupg}"
   MOUNTDIR:
     sh: echo "/run/media/$USER/{{ .DEVICE_LABEL }}"
-
+  GPG: /usr/local/bin/gpg
 
 tasks:
   mount-disk:
     run: once
     cmds:
-      - udisksctl mount --block-device {{ .DEVICE }}
+      - udisksctl mount --block-device {{ .DEVICE }} || sudo diskutil mount -mountPoint {{.MOUNTDIR}} {{ .DEVICE_LABEL }}
 
   unmount-disk:
     run: once
     cmds:
-      - udisksctl unmount --block-device {{ .DEVICE }}
+      - udisksctl unmount --block-device {{ .DEVICE }} || sudo diskutil unmount {{ .DEVICE_LABEL }}
 
   ensure-gpgdir:
     run: once
@@ -36,45 +34,44 @@ tasks:
       - find {{ .GPGDIR }} -type d -exec chmod 700 {} \;
 
   offline-key:
-    description: Exports a key to offline.
+    desc: Exports a key to offline.
     cmds:
       - task: mount-disk
       - defer: { task: unmount-disk }
-      - gpg2 -a --export {{ .FINGERPRINT }} > {{ .MOUNTDIR }}/{{ .KEY_NAME }}.pub.asc
-      - gpg2 -a --export-secret-keys {{ .FINGERPRINT }} > {{ .MOUNTDIR }}/{{ .KEY_NAME }}.pri.asc
-      - gpg2 -a --export-secret-subkeys {{ .FINGERPRINT }} > {{ .MOUNTDIR }}/{{ .KEY_NAME }}.sub.asc
-      - gpg2 -a --gen-revoke {{ .FINGERPRINT }} > {{ .MOUNTDIR }}/{{ .KEY_NAME }}.rev.asc
-      - gpg2 --export-ownertrust > {{ .MOUNTDIR }}/trust-db-backup.txt
+      - "{{.GPG}} -a --export {{ .FINGERPRINT }} > {{ .MOUNTDIR }}/{{ .KEY_NAME }}.pub.asc"
+      - "{{.GPG}} -a --export-secret-keys {{ .FINGERPRINT }} > {{ .MOUNTDIR }}/{{ .KEY_NAME }}.pri.asc"
+      - "{{.GPG}} -a --export-secret-subkeys {{ .FINGERPRINT }} > {{ .MOUNTDIR }}/{{ .KEY_NAME }}.sub.asc"
+      - "{{.GPG}} -a --gen-revoke {{ .FINGERPRINT }} > {{ .MOUNTDIR }}/{{ .KEY_NAME }}.rev.asc"
+      - "{{.GPG}} --export-ownertrust > {{ .MOUNTDIR }}/trust-db-backup.txt"
       - gpg-connect-agent "DELETE_KEY {{ .KEYGRIP }}" /bye
-      - gpg2 --list-secret-keys
+      - "{{.GPG}} --list-secret-keys"
     interactive: true
     vars:
       KEYGRIP:
-        sh: gpg2 --list-secret-keys --with-keygrip | grep Keygrip | sed '1!d' | cut -f2 -d=
+        sh: "{{.GPG}} --list-secret-keys --with-keygrip | grep Keygrip | sed '1!d' | cut -f2 -d="
 
   online-full-key:
-    description: Imports the full keyring to use online.
+    desc: Imports the full keyring to use online.
     cmds:
       - task: mount-disk
       - defer: { task: unmount-disk }
       - task: ensure-gpgdir
       - rm {{ .GPGDIR }}/trustdb.gpg || true
-      - gpg2 --import {{ .MOUNTDIR }}/{{ .KEY_NAME }}.pub.asc
-      - gpg2 --import {{ .MOUNTDIR }}/{{ .KEY_NAME }}.pri.asc
+      - "{{.GPG}} --import {{ .MOUNTDIR }}/{{ .KEY_NAME }}.pub.asc"
+      - "{{.GPG}} --import {{ .MOUNTDIR }}/{{ .KEY_NAME }}.pri.asc"
       - task: online-partial-key
 
   online-partial-key:
-    description: Imports the subkeys to use online.
+    desc: Imports the subkeys to use online.
     cmds:
       - task: mount-disk
       - defer: { task: unmount-disk }
       - task: ensure-gpgdir
-      - rm {{ .GPGDIR }}/trustdb.gpg
-      - gpg2 --import {{ .MOUNTDIR }}/{{ .KEY_NAME }}.sub.asc
-      - gpg --import-ownertrust < {{ .MOUNTDIR }}/trust-db-backup.txt 
+      - rm {{ .GPGDIR }}/trustdb.gpg || true
+      - "{{.GPG}} --import {{ .MOUNTDIR }}/{{ .KEY_NAME }}.sub.asc"
+      - "{{.GPG}} --import-ownertrust < {{ .MOUNTDIR }}/trust-db-backup.txt"
 
   publish-keys:
     cmds:
-      - gpg2 --keyserver hkps://keys.openpgp.org --send-keys {{ .FINGERPRINT }}
-      - gpg2 --keyserver hkp://keyserver.ubuntu.com --send-keys {{ .FINGERPRINT }}
-
+      - "{{.GPG}} --keyserver hkps://keys.openpgp.org --send-keys {{ .FINGERPRINT }}"
+      - "{{.GPG}} --keyserver hkp://keyserver.ubuntu.com --send-keys {{ .FINGERPRINT }}"
