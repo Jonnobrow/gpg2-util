@@ -12,12 +12,14 @@ vars:
     sh: echo "${GNUPGHOME:-$HOME/.gnupg}"
   MOUNTDIR:
     sh: echo "/run/media/$USER/{{ .DEVICE_LABEL }}"
-  GPG: /usr/local/bin/gpg
+  GPG:
+    sh: which gpg
 
 tasks:
   mount-disk:
     run: once
     cmds:
+      - mkdir -p {{ .MOUNTDIR }}
       - udisksctl mount --block-device {{ .DEVICE }} || sudo diskutil mount -mountPoint {{.MOUNTDIR}} {{ .DEVICE_LABEL }}
 
   unmount-disk:
